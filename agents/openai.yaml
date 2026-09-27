@@ -1,0 +1,3 @@
+interface:
+  display_name: "Batch Poster Image Generation"
+  short_description: "Queue and generate poster image batches with A2 QA"
