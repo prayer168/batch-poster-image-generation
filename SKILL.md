@@ -12,7 +12,7 @@ Use this skill when a user wants a large set of poster images generated from an 
 1. Locate the prompt source and build a manifest before generating. Accept JSON/CSV/Markdown or local HTML cards. Preserve the source order and assign stable IDs such as `P001`–`P071`.
 2. Normalize every item into the schema in `references/manifest-schema.md`. Keep the educational subject, Taiwan-specific species names, category, learning objective, and required visual elements. Remove long paragraphs from the image prompt; request short labels only and plan to typeset Traditional Chinese later.
 3. Use `gpt-image-2.5-sunburst` for the visual master, portrait A2 ratio, with a target around `2352 × 3328 px` (or the closest supported portrait size). Do not claim that the image model directly outputs `5031 × 7087 px`: generate the clean master first, then upscale and add bleed in a graphics/layout tool. Keep `transparent_background=false` unless the user explicitly requests a cutout.
-4. Queue jobs in numeric order and process them in batches of 6 (use 4 when the machine or image tool is slow). The user should receive one progress update per batch, not a confirmation request for each image. If the underlying image tool only accepts one image per call, loop over the queue internally and continue automatically.
+4. Queue jobs in numeric order and process as many as the current turn can safely complete. A batch is a scheduling unit, not a requirement to stop after one image: use 6 as a normal checkpoint, but continue with the next batch automatically while time, token budget, and image-tool capacity remain. The user should receive one progress update per checkpoint, not a confirmation request for each image. If the underlying image tool only accepts one image per call, loop over the queue internally and continue automatically.
 5. For each job, save status, prompt version, model, timestamp, output name, and any retry/error in the manifest. Retry a failed item at most twice with a targeted correction; do not regenerate accepted items.
 6. After each batch, run a lightweight visual QA: correct subject/anatomy, readable focal composition, no accidental watermark/logo, enough quiet space for Traditional Chinese text, no important subject inside the 3 mm trim/bleed risk zone, and no invented factual claim embedded in the artwork. Flag uncertain species identification for human review.
 7. Stage outputs using this structure:
@@ -30,6 +30,25 @@ poster-batch/
 ```
 
 8. Do not mark an item `print-ready` until it has a high-quality upscale, 3 mm bleed, final A2 canvas, and Traditional Chinese text re-typeset in Canva, PowerPoint, Affinity Publisher, or SVG. The final output is a layout artifact, not merely the AI master.
+
+## Continue-until-handoff protocol
+
+When the user explicitly asks to keep generating until the token/turn limit and then hand off:
+
+1. Start from the manifest and resume only records not already `accepted`, `needs-upscale`, `ready-for-layout`, or explicitly `failed`.
+2. Continue generating checkpoint batches without asking for per-image approval. Before each new image call, ensure enough remaining turn budget for the call and its bookkeeping; stop starting new calls when the remaining budget is too small for a safe completion.
+3. At every checkpoint, persist the manifest, prompt version, output paths, retry counts, and a `continuation.json` file containing the next poster ID, completed IDs, failed IDs, timestamp, and target output root.
+4. When the safe budget boundary is reached, do not claim the catalog is complete. Report the exact completed/remaining counts and hand off the continuation task with a concise instruction to resume from `continuation.json`. If the host supports thread handoff, use the handoff mechanism; otherwise emit the handoff packet for the next Codex turn.
+5. The handoff must be resumable and idempotent: accepted files are never regenerated or overwritten, and only queued/retrying records are eligible for the next worker.
+
+Suggested handoff packet:
+
+```text
+Resume batch-poster-image-generation from [OUTPUT_ROOT]/manifest/continuation.json.
+Do not regenerate accepted files. Continue automatically in checkpoint batches until
+the next safe budget boundary, update the manifest and continuation file, then hand
+off again if items remain. Report completed, failed, and remaining poster IDs.
+```
 
 ## Reusable master prompt
 
